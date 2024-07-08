@@ -5,5 +5,7 @@ class Player:
 			"Name":MemberReference.name,
 			"ID":MemberReference.id,
 		}
+		Self.DefaultCharacter = None
 		Self.Games = {}
 		Self.Characters = {}
+		Self.Aliases = {}

@@ -2,12 +2,16 @@ from discord import Game as DiscordGame
 from discord import Intents
 from logging import getLogger, Formatter,  DEBUG, INFO, Logger
 from logging.handlers import RotatingFileHandler
-from discord import Interaction, Member
+from discord import Interaction, Member, Embed
 from discord.ext.commands import Bot, Context
 from sys import argv
 from Panels.Panel import Panel
 from Player import Player
+from Character import Character
 from Creator import Creator
+from discord import Webhook
+from os.path import exists, join, isdir, isfile
+from os import mkdir, listdir
 
 class ImmersionHelper:
 	def __init__(Self) -> None:
@@ -51,10 +55,59 @@ class ImmersionHelper:
 	async def Save_Game(Self, Username, GivenGame):...
 
 
-	async def Save_Character(Self, Username, GivenCharacter):...
+	async def Save_Characters(Self, Username):
+		P:Player = Self.Players[Username]
+		CharacterData = ""
+		for Character in P.Characters.values():
+			CharacterData += "~".join([Value for Value in Character.Data.values()])
+			if P.DefaultCharacter == Character.Data["Name"]:
+				CharacterData += "~Default"
+			CharacterData += "\n"
+		with open(join("Data", Username, 'characters.txt'), 'w') as SaveFile:
+			SaveFile.write(CharacterData)
 
+	async def Save_Aliases(Self, Username):
+		with open(join("Data", Username, 'aliases.txt'), 'w') as SaveFile:
+			SaveFile.write("~".join([f'{Name}:{Object.Data["Name"]}' for Name, Object in Self.Players[Username].Aliases.items()]))
 
 	async def Save_Object(Self, Username, GivenObject):...
+
+
+	def Load_Characters(Self, PlayerName, CharactersData):
+		for CharacterData in CharactersData:
+			CharacterData = CharacterData.split("~")
+			P:Player = Self.Players[PlayerName]
+			LoadedCharacter = Character(CharacterData[0])
+			if len(CharacterData) == 3:
+				P.DefaultCharacter = LoadedCharacter.Data["Name"]
+			P.Characters.update({LoadedCharacter.Data["Name"]:LoadedCharacter})
+
+
+	def Load_Aliases(Self, PlayerName, AliasesData):
+		Aliases = AliasesData.split("~")
+		P:Player = Self.Players[PlayerName]
+		for AliasData in Aliases:
+			Data = AliasData.split(":")
+			Alias = Data[0]
+			ObjectName = Data[1]
+			print(P.Characters)
+			P.Aliases.update({Alias:P.Characters[ObjectName]})
+			P.Characters[ObjectName].Alias = Alias
+
+	def Load_Player_Data(Self):
+		for PlayerDirectory in listdir("Data"):
+			CharacterData = None
+			AliasData = None
+			if isfile(join("Data", PlayerDirectory)): continue
+			for DataFile in listdir(join("Data", PlayerDirectory)):
+				if DataFile == "characters.txt":
+					with open(join("Data", PlayerDirectory, "characters.txt"), 'r') as DataFile:
+						CharacterData = DataFile.readlines()
+				if DataFile == "aliases.txt":
+					with open(join("Data", PlayerDirectory, "aliases.txt"), 'r') as DataFile:
+						AliasData = DataFile.readlines()[0]
+			if CharacterData != None: Self.Load_Characters(PlayerDirectory, CharacterData)
+			if AliasData != None: Self.Load_Aliases(PlayerDirectory, AliasData)
 
 
 global IH
@@ -76,12 +129,49 @@ async def on_ready() -> None:
 				
 				if Member.name in IH.CreatorNames:
 					IH.Creators.update({Member.name:Creator(Member)})
+				if not exists(join("Data", Member.name)): mkdir(join("Data", Member.name))
 
 
-@IH.Bot.command(aliases=["ih"])
-async def Main_Event(InitialContext:Context) -> None:
+	IH.Load_Player_Data()
+	print(IH.Creators)
+
+
+@IH.Bot.command(aliases=["ih", "help"])
+async def Main_Event(InitialContext:Context, *Arguments) -> None:
 	User = InitialContext.message.author
-	Panel(InitialContext, User, IH)
+	if len(Arguments) > 0:
+		if len(Arguments) == 1:
+			if len(IH.Players[User.name].Characters) <= 0:
+				await InitialContext.message.delete()
+				await InitialContext.channel.send(content="You do not have any characters.")
+			else:
+				await InitialContext.message.delete()
+				Webhook = await InitialContext.channel.create_webhook(name="DefaultCharacter")
+				DefaultCharacter = IH.Players[User.name].Characters[IH.Players[User.name].DefaultCharacter]
+
+				if DefaultCharacter.Data["Icon"] == "None": 
+					await Webhook.send(str(Arguments[0]), username=DefaultCharacter.Data["Name"], avatar_url="https://static.wikia.nocookie.net/all-worlds-alliance/images/2/29/Hawk_anime_full_appearance_2.png/revision/latest?cb=20200309064015")
+				else:
+					await Webhook.send(str(Arguments[0]), username=DefaultCharacter.Data["Name"], avatar_url=DefaultCharacter.Data["Icon"])
+		elif len(Arguments) == 2:
+			print("I'm flagged dialogue")
+			print(IH.Players[User.name].Aliases)
+			print(Arguments[0])
+			if Arguments[0] in IH.Players[User.name].Aliases.keys():
+				UsedCharacter = IH.Players[User.name].Aliases[Arguments[0]]
+				Webhook = await InitialContext.channel.create_webhook(name="Alias Character")
+				await InitialContext.message.delete()
+
+				if UsedCharacter.Data["Icon"] == "None": 
+					await Webhook.send(str(Arguments[1]), username=UsedCharacter.Data["Name"], avatar_url="https://static.wikia.nocookie.net/all-worlds-alliance/images/2/29/Hawk_anime_full_appearance_2.png/revision/latest?cb=20200309064015")
+				else:
+					await Webhook.send(str(Arguments[1]), username=UsedCharacter.Data["Name"], avatar_url=UsedCharacter.Data["Icon"])
+
+		Webhooks = await InitialContext.channel.webhooks()
+		for W in Webhooks:
+			await W.delete()
+	else:
+		Panel(InitialContext, User, IH)
 
 
 IH.Bot.run(IH.Token)
